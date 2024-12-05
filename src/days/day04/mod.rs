@@ -1,130 +1,143 @@
-use regex::Regex;
-use std::fs;
+use std::{
+	collections::{HashMap, HashSet},
+	fs,
+};
 
 pub fn main() {
-	let content = read_input();
-	let grid = create_grid(&content);
-	let xmas_occurrences = count_xmas_occurrences(&grid);
-	let x_mas_occurrences = count_x_mas_occurrences(&grid);
+	let (rules, updates) = read_input();
+	let dependency_map = rules_to_dependency_map(&rules);
 
-	println!("XMAS occurrences: {}", xmas_occurrences);
-	println!("X-MAS occurrences: {}", x_mas_occurrences);
+	let sum_ordered = sum_middle_ordered_updates(&updates, &dependency_map);
+	let sum_unordered = sum_middle_unordered_updates(&updates, &dependency_map);
+
+	println!("Sum of middle ordered updates: {}", sum_ordered);
+	println!("Sum of middle unordered updates: {}", sum_unordered);
 }
 
-/// Read the input file to bytes
-fn read_input() -> String {
-	fs::read_to_string("./src/days/day04/input").expect("Unable to read file.")
+/// Read the input file into page ordering rules and updates
+fn read_input() -> (Vec<(usize, usize)>, Vec<Vec<usize>>) {
+	let content = fs::read_to_string("./src/days/day05/input").expect("Unable to read file.");
+
+	// the empty line separates the rules from the updates
+	let parts: Vec<&str> = content.split("\n\n").collect();
+
+	// rules format: number|number
+	let rules = parts[0]
+		.lines()
+		.map(|line| {
+			let mut parts = line.split("|");
+			let start = parts.next().unwrap().parse().unwrap();
+			let end = parts.next().unwrap().parse().unwrap();
+			(start, end)
+		})
+		.collect();
+
+	// updates format: list of comma separated numbers
+	let updates = parts[1]
+		.lines()
+		.map(|line| line.split(",").map(|num| num.parse().unwrap()).collect())
+		.collect();
+
+	(rules, updates)
 }
 
-/// Create a grid from the input
-fn create_grid(content: &String) -> Vec<Vec<char>> {
-	let mut grid = Vec::new();
-	for line in content.lines() {
-		let mut row = Vec::new();
-		for c in line.chars() {
-			row.push(c);
-		}
-		grid.push(row);
+/// Convert the rules into dependency map
+fn rules_to_dependency_map(rules: &[(usize, usize)]) -> HashMap<usize, HashSet<usize>> {
+	let mut dependency_map = HashMap::new();
+
+	for (before, after) in rules {
+		dependency_map
+			.entry(*before)
+			.or_insert(HashSet::new())
+			.insert(*after);
 	}
-	grid
+
+	dependency_map
 }
 
-/// Count the number of occurrences of the word "XMAS" in the grid
-fn count_xmas_occurrences(grid: &[Vec<char>]) -> usize {
-	let rows = grid.len();
-	let cols = grid[0].len();
-	let target = "XMAS".chars().collect::<Vec<char>>();
-	let target_len = target.len();
-
-	let mut count = 0;
-
-	for row in 0..rows {
-		for col in 0..cols {
-			// Check all 8 possible directions
-			let directions = [
-				(0, 1),   // right
-				(0, -1),  // left
-				(1, 0),   // down
-				(-1, 0),  // up
-				(1, 1),   // diagonal down-right
-				(-1, -1), // diagonal up-left
-				(1, -1),  // diagonal down-left
-				(-1, 1),  // diagonal up-right
-			];
-
-			for &(dr, dc) in &directions {
-				if matches_target(grid, row, col, dr, dc, &target, target_len) {
-					count += 1;
-				}
+/// Check if the update is ordered according to the dependency map
+fn is_update_ordered(update: &Vec<usize>, dependency_map: &HashMap<usize, HashSet<usize>>) -> bool {
+	for i in 0..update.len() - 1 {
+		let before = update.get(i).unwrap();
+		for j in i + 1..update.len() {
+			let after = update.get(j).unwrap();
+			// after -> before should not be in the dependency map
+			if dependency_map.contains_key(after)
+				&& dependency_map.get(after).unwrap().contains(before)
+			{
+				return false;
 			}
 		}
 	}
-
-	count
-}
-
-/// Check if the target word matches the grid starting at the given position and moving in the given direction
-fn matches_target(
-	grid: &[Vec<char>],
-	start_row: usize,
-	start_col: usize,
-	increment_row: isize,
-	increment_column: isize,
-	target: &[char],
-	target_len: usize,
-) -> bool {
-	let rows = grid.len();
-	let cols = grid[0].len();
-
-	for i in 0..target_len {
-		let r = start_row as isize + i as isize * increment_row;
-		let c = start_col as isize + i as isize * increment_column;
-
-		if r < 0 || r >= rows as isize || c < 0 || c >= cols as isize {
-			return false;
-		}
-
-		if grid[r as usize][c as usize] != target[i] {
-			return false;
-		}
-	}
-
 	true
 }
 
-/// Count the number of occurrences of the pattern X-"MAS" in the grid
-fn count_x_mas_occurrences(grid: &[Vec<char>]) -> usize {
-	let rows = grid.len();
-	let cols = grid[0].len();
+/// Sum the middle number of all ordered updates
+fn sum_middle_ordered_updates(
+	updates: &Vec<Vec<usize>>,
+	dependency_map: &HashMap<usize, HashSet<usize>>,
+) -> usize {
+	let mut sum = 0;
+	for update in updates {
+		if is_update_ordered(&update, dependency_map) {
+			let middle_number = update.get(update.len() / 2).unwrap();
+			sum += middle_number;
+		}
+	}
+	sum
+}
 
-	let mut count = 0;
+/// Topological sort an update
+fn topological_sort(
+	update: &Vec<usize>,
+	dependency_map: &HashMap<usize, HashSet<usize>>,
+) -> Vec<usize> {
+	let mut sorted = Vec::new();
+	let mut to_visit = update.clone();
 
-	// Only iterate over inner characters
-	for row in 1..rows - 1 {
-		for col in 1..cols - 1 {
-			if grid[row][col] == 'A' && is_valid_x_mas(grid, row, col) {
-				count += 1;
-			}
+	while !to_visit.is_empty() {
+		let next = to_visit[to_visit.len() - 1];
+		visit(next, dependency_map, &mut to_visit, &mut sorted);
+	}
+
+	sorted
+}
+
+/// Visit a node in the topological sort
+fn visit(
+	next: usize,
+	outgoing_edges: &HashMap<usize, HashSet<usize>>,
+	to_visit: &mut Vec<usize>,
+	sorted: &mut Vec<usize>,
+) {
+	if !to_visit.contains(&next) {
+		return;
+	}
+
+	let index = to_visit.iter().position(|x| *x == next).unwrap();
+	to_visit.remove(index);
+
+	if let Some(dependencies) = outgoing_edges.get(&next) {
+		for dependency in dependencies {
+			visit(*dependency, outgoing_edges, to_visit, sorted);
 		}
 	}
 
-	count
+	sorted.push(next);
 }
 
-/// Check if the pattern X-"MAS" is valid at the given position
-fn is_valid_x_mas(grid: &[Vec<char>], row: usize, col: usize) -> bool {
-	// check that top left to bottom right diagonal has one m and one s
-	if !((grid[row - 1][col - 1] == 'M' && grid[row + 1][col + 1] == 'S')
-		|| (grid[row - 1][col - 1] == 'S' && grid[row + 1][col + 1] == 'M'))
-	{
-		return false;
+/// Sum the middle number of all unordered updates
+fn sum_middle_unordered_updates(
+	updates: &Vec<Vec<usize>>,
+	dependency_map: &HashMap<usize, HashSet<usize>>,
+) -> usize {
+	let mut sum = 0;
+	for update in updates {
+		if !is_update_ordered(&update, dependency_map) {
+			let sorted = topological_sort(&update, dependency_map);
+			let middle_number = sorted.get(sorted.len() / 2).unwrap();
+			sum += middle_number;
+		}
 	}
-
-	if !((grid[row - 1][col + 1] == 'M' && grid[row + 1][col - 1] == 'S')
-		|| (grid[row - 1][col + 1] == 'S' && grid[row + 1][col - 1] == 'M'))
-	{
-		return false;
-	}
-
-	return true;
+	sum
 }
